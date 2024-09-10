@@ -17,7 +17,7 @@ COPY . .
 RUN go build weather.go
 
 # Expose port 8080 to the outside world
-EXPOSE 3333
+EXPOSE 51101
 
 # Command to run the executable
 CMD ["./weather"]

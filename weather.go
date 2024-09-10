@@ -108,5 +108,5 @@ func main() {
 	r.Get("/", CurrentTempHandler)
 	r.Get("/cur", CurrentRecordHandler)
 	r.Post("/", AddRecordHandler)
-	http.ListenAndServe(":3333", r)
+	http.ListenAndServe(":51101", r)
 }
