@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"time"
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
@@ -17,15 +16,30 @@ var sqlStatement string = `select temperature from airfeelings order by datetime
 var db *sql.DB
 
 type WeatherRecord struct {
-	DateTime           time.Time
+	ID                 int
+	DateTime           string
 	Temperature        float64
 	Humidity           float64
 	BarometricPressure float64
 }
 
+func enableCors(w *http.ResponseWriter) {
+	(*w).Header().Set("Access-Control-Allow-Origin", "*")
+}
+
 func CurrentTempHandler(w http.ResponseWriter, r *http.Request) {
+	enableCors(&w)
 	s := fmt.Sprintf("%f", CurrentTemp(db))
 	w.Write([]byte(s))
+}
+func CurrentRecordHandler(w http.ResponseWriter, r *http.Request) {
+	enableCors(&w)
+	wr := CurrentRecord(db)
+	err := json.NewEncoder(w).Encode(wr)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
 }
 func AddRecordDB(wr WeatherRecord) (bool, error) {
 	update, err := db.Begin()
@@ -58,12 +72,21 @@ func AddRecordHandler(w http.ResponseWriter, r *http.Request) {
 }
 func CurrentTemp(db *sql.DB) float64 {
 	var curTempF float64
-	sqlStatement := `select temperature from airfeelings order by datetime desc LIMIT 1`
+	sqlStatement := `select temperature from airfeelings order by id desc LIMIT 1`
 	err := db.QueryRow(sqlStatement).Scan(&curTempF)
 	if err != nil {
 		log.Fatalf("Error executing SQL statement: %v", err)
 	}
 	return curTempF
+}
+func CurrentRecord(db *sql.DB) WeatherRecord {
+	var curWR WeatherRecord
+	sqlStatement := `select * from airfeelings order by id desc LIMIT 1`
+	err := db.QueryRow(sqlStatement).Scan(&curWR.ID, &curWR.DateTime, &curWR.Temperature, &curWR.Humidity, &curWR.BarometricPressure)
+	if err != nil {
+		log.Fatalf("Error executing SQL statement: %v", err)
+	}
+	return curWR
 }
 func main() {
 	// Example SQL statement. Replace this with the actual statement you want to execute.
@@ -83,6 +106,7 @@ func main() {
 	//#	w.Write([]byte("root."))
 	//#})
 	r.Get("/", CurrentTempHandler)
+	r.Get("/cur", CurrentRecordHandler)
 	r.Post("/", AddRecordHandler)
-	http.ListenAndServe(":51102", r)
+	http.ListenAndServe(":3333", r)
 }
