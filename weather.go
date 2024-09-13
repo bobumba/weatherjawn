@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 
@@ -23,25 +22,7 @@ type WeatherRecord struct {
 	BarometricPressure float64
 }
 
-func enableCors(w *http.ResponseWriter) {
-	(*w).Header().Set("Access-Control-Allow-Origin", "*")
-}
-
-func CurrentTempHandler(w http.ResponseWriter, r *http.Request) {
-	enableCors(&w)
-	s := fmt.Sprintf("%f", CurrentTemp(db))
-	w.Write([]byte(s))
-}
-func CurrentRecordHandler(w http.ResponseWriter, r *http.Request) {
-	enableCors(&w)
-	wr := CurrentRecord(db)
-	err := json.NewEncoder(w).Encode(wr)
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-}
-func AddRecordDB(wr WeatherRecord) (bool, error) {
+func (a *WeatherRecord) AddRecord() (bool, error) {
 	update, err := db.Begin()
 	if err != nil {
 		return false, err
@@ -51,35 +32,55 @@ func AddRecordDB(wr WeatherRecord) (bool, error) {
 		return false, err
 	}
 	defer statement.Close()
-	_, err = statement.Exec(wr.DateTime, wr.Temperature, wr.Humidity, wr.BarometricPressure)
+	_, err = statement.Exec(a.DateTime, a.Temperature, a.Humidity, a.BarometricPressure)
 	if err != nil {
 		return false, err
 	}
 	update.Commit()
 	return true, nil
 }
+
+func (c *WeatherRecord) RetrieveRecord() (*WeatherRecord, error) {
+	var curWR WeatherRecord
+	sqlStatement := `select * from airfeelings order by id desc LIMIT 1`
+	err := db.QueryRow(sqlStatement).Scan(&curWR.ID, &curWR.DateTime, &curWR.Temperature, &curWR.Humidity, &curWR.BarometricPressure)
+	if err != nil {
+		log.Fatalf("Error executing SQL statement: %v", err)
+	}
+	return &curWR, nil
+}
+func enableCors(w *http.ResponseWriter) {
+	(*w).Header().Set("Access-Control-Allow-Origin", "*")
+}
+
 func AddRecordHandler(w http.ResponseWriter, r *http.Request) {
 	var record WeatherRecord
 	err := json.NewDecoder(r.Body).Decode(&record)
 	if err != nil {
 		log.Fatalf("fuckthis: %v", err)
 	}
-	_, err = AddRecordDB(record)
+	_, err = record.AddRecord()
 	if err != nil {
 		log.Fatalf("fuckthis2: %v", err)
 	}
 	w.Write([]byte("ok"))
 }
-func CurrentTemp(db *sql.DB) float64 {
-	var curTempF float64
-	sqlStatement := `select temperature from airfeelings order by id desc LIMIT 1`
-	err := db.QueryRow(sqlStatement).Scan(&curTempF)
+
+func RetrieveRecordHandler(w http.ResponseWriter, r *http.Request) {
+	enableCors(&w)
+	var wr WeatherRecord
+	cur, err := wr.RetrieveRecord()
 	if err != nil {
-		log.Fatalf("Error executing SQL statement: %v", err)
+		log.Fatalf("eror with db retrieve: %v", err)
 	}
-	return curTempF
+	err = json.NewEncoder(w).Encode(cur)
+	if err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
 }
-func CurrentRecord(db *sql.DB) WeatherRecord {
+
+func RetrieveRecord(db *sql.DB) WeatherRecord {
 	var curWR WeatherRecord
 	sqlStatement := `select * from airfeelings order by id desc LIMIT 1`
 	err := db.QueryRow(sqlStatement).Scan(&curWR.ID, &curWR.DateTime, &curWR.Temperature, &curWR.Humidity, &curWR.BarometricPressure)
@@ -88,6 +89,7 @@ func CurrentRecord(db *sql.DB) WeatherRecord {
 	}
 	return curWR
 }
+
 func main() {
 	// Example SQL statement. Replace this with the actual statement you want to execute.
 
@@ -105,8 +107,7 @@ func main() {
 	//#r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 	//#	w.Write([]byte("root."))
 	//#})
-	r.Get("/", CurrentTempHandler)
-	r.Get("/cur", CurrentRecordHandler)
+	r.Get("/", RetrieveRecordHandler)
 	r.Post("/", AddRecordHandler)
 	http.ListenAndServe(":51101", r)
 }

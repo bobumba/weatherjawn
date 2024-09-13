@@ -1,0 +1,11 @@
+version: '3.8'  # Use the version that matches your Docker Compose setup
+services:
+  weatherjawn:
+    build:
+      context: .  # Set the build context to the current directory
+      dockerfile: Dockerfile  # Specify the Dockerfile if it's not named Dockerfile
+    image: weatherjawn:latest  # Name and tag of the image to build
+    ports:
+      - "8080:51101"  # Map host port to container port
+    restart: always  # Restart policy
+
