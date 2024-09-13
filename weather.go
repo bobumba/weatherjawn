@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"log"
@@ -22,30 +23,40 @@ type WeatherRecord struct {
 	BarometricPressure float64
 }
 
-func (a *WeatherRecord) AddRecord() (bool, error) {
-	update, err := db.Begin()
-	if err != nil {
-		return false, err
-	}
-	statement, err := update.Prepare("INSERT INTO airfeelings (datetime, temperature, humidity, barometricpressure) VALUES (?, ?, ?, ?)")
-	if err != nil {
-		return false, err
-	}
-	defer statement.Close()
-	_, err = statement.Exec(a.DateTime, a.Temperature, a.Humidity, a.BarometricPressure)
-	if err != nil {
-		return false, err
-	}
-	update.Commit()
-	return true, nil
+type WeatherService struct {
+	DB *sql.DB
 }
 
-func (c *WeatherRecord) RetrieveRecord() (*WeatherRecord, error) {
-	var curWR WeatherRecord
-	sqlStatement := `select * from airfeelings order by id desc LIMIT 1`
-	err := db.QueryRow(sqlStatement).Scan(&curWR.ID, &curWR.DateTime, &curWR.Temperature, &curWR.Humidity, &curWR.BarometricPressure)
+func NewWeatherService(d *sql.DB) *WeatherService {
+	return &WeatherService{DB: d}
+}
+
+func (a *WeatherService) AddRecord(ctx context.Context, record WeatherRecord) error {
+	tx, err := a.DB.BeginTx(ctx, nil)
 	if err != nil {
-		log.Fatalf("Error executing SQL statement: %v", err)
+		return err
+	}
+	defer tx.Rollback()
+
+	query, err := tx.PrepareContext(ctx, "INSERT INTO airfeelings (datetime, temperature, humidity, barometricpressure) VALUES (?, ?, ?, ?)")
+	if err != nil {
+		return err
+	}
+	defer query.Close()
+
+	_, err = query.ExecContext(ctx, record.DateTime, record.Temperature, record.Humidity, record.BarometricPressure)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (c *WeatherService) RetrieveRecord(ctx context.Context) (*WeatherRecord, error) {
+	var curWR WeatherRecord
+	query := `select * from airfeelings order by id desc LIMIT 1`
+	err := db.QueryRowContext(ctx, query).Scan(&curWR.ID, &curWR.DateTime, &curWR.Temperature, &curWR.Humidity, &curWR.BarometricPressure)
+	if err != nil {
+		log.Fatalf("Error retrieving record: %v", err)
 	}
 	return &curWR, nil
 }
@@ -53,26 +64,30 @@ func enableCors(w *http.ResponseWriter) {
 	(*w).Header().Set("Access-Control-Allow-Origin", "*")
 }
 
-func AddRecordHandler(w http.ResponseWriter, r *http.Request) {
+func (a *WeatherService) AddRecordHandler(w http.ResponseWriter, r *http.Request) {
 	var record WeatherRecord
-	err := json.NewDecoder(r.Body).Decode(&record)
-	if err != nil {
-		log.Fatalf("fuckthis: %v", err)
+	if err := json.NewDecoder(r.Body).Decode(&record); err != nil {
+		http.Error(w, "could not decode", http.StatusBadRequest)
+		log.Printf("could not decode json: %v", err)
+		return
 	}
-	_, err = record.AddRecord()
-	if err != nil {
-		log.Fatalf("fuckthis2: %v", err)
+	if err := a.AddRecord(r.Context(), record); err != nil {
+		http.Error(w, "error adding record", http.StatusBadRequest)
+		log.Printf("error adding record: %v", err)
+		return
 	}
-	w.Write([]byte("ok"))
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{"status": "record added"})
 }
 
-func RetrieveRecordHandler(w http.ResponseWriter, r *http.Request) {
+func (a *WeatherService) RetrieveRecordHandler(w http.ResponseWriter, r *http.Request) {
 	enableCors(&w)
-	var wr WeatherRecord
-	cur, err := wr.RetrieveRecord()
+	cur, err := a.RetrieveRecord(r.Context())
 	if err != nil {
-		log.Fatalf("eror with db retrieve: %v", err)
+		http.Error(w, "error retrieving record", http.StatusInternalServerError)
+		log.Printf("eror with db retrieve: %v", err)
 	}
+	w.Header().Set("Content-type", "application/json")
 	err = json.NewEncoder(w).Encode(cur)
 	if err != nil {
 		http.Error(w, err.Error(), 500)
@@ -101,13 +116,14 @@ func main() {
 	}
 	defer db.Close()
 
+	service := NewWeatherService(db)
 	// Execute the SQL statement.
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	//#r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 	//#	w.Write([]byte("root."))
 	//#})
-	r.Get("/", RetrieveRecordHandler)
-	r.Post("/", AddRecordHandler)
+	r.Get("/", service.RetrieveRecordHandler)
+	r.Post("/", service.AddRecordHandler)
 	http.ListenAndServe(":51101", r)
 }
