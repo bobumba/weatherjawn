@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi"
 	"github.com/go-chi/chi/middleware"
+	"github.com/go-chi/cors"
 	_ "modernc.org/sqlite"
 )
 
@@ -51,7 +52,7 @@ func (a *WeatherService) AddRecord(ctx context.Context, record WeatherRecord) er
 	return tx.Commit()
 }
 
-func (c *WeatherService) RetrieveRecord(ctx context.Context) (*WeatherRecord, error) {
+func (a *WeatherService) RetrieveRecord(ctx context.Context) (*WeatherRecord, error) {
 	var curWR WeatherRecord
 	query := `select * from airfeelings order by id desc LIMIT 1`
 	err := db.QueryRowContext(ctx, query).Scan(&curWR.ID, &curWR.DateTime, &curWR.Temperature, &curWR.Humidity, &curWR.BarometricPressure)
@@ -59,9 +60,6 @@ func (c *WeatherService) RetrieveRecord(ctx context.Context) (*WeatherRecord, er
 		log.Fatalf("Error retrieving record: %v", err)
 	}
 	return &curWR, nil
-}
-func enableCors(w *http.ResponseWriter) {
-	(*w).Header().Set("Access-Control-Allow-Origin", "*")
 }
 
 func (a *WeatherService) AddRecordHandler(w http.ResponseWriter, r *http.Request) {
@@ -81,7 +79,6 @@ func (a *WeatherService) AddRecordHandler(w http.ResponseWriter, r *http.Request
 }
 
 func (a *WeatherService) RetrieveRecordHandler(w http.ResponseWriter, r *http.Request) {
-	enableCors(&w)
 	cur, err := a.RetrieveRecord(r.Context())
 	if err != nil {
 		http.Error(w, "error retrieving record", http.StatusInternalServerError)
@@ -93,16 +90,6 @@ func (a *WeatherService) RetrieveRecordHandler(w http.ResponseWriter, r *http.Re
 		http.Error(w, err.Error(), 500)
 		return
 	}
-}
-
-func RetrieveRecord(db *sql.DB) WeatherRecord {
-	var curWR WeatherRecord
-	sqlStatement := `select * from airfeelings order by id desc LIMIT 1`
-	err := db.QueryRow(sqlStatement).Scan(&curWR.ID, &curWR.DateTime, &curWR.Temperature, &curWR.Humidity, &curWR.BarometricPressure)
-	if err != nil {
-		log.Fatalf("Error executing SQL statement: %v", err)
-	}
-	return curWR
 }
 
 func main() {
@@ -120,6 +107,14 @@ func main() {
 	// Execute the SQL statement.
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   []string{"*"},                             // Allow all origins, or specify allowed domains
+		AllowedMethods:   []string{"GET", "POST", "OPTIONS"},        // Specify allowed HTTP methods
+		AllowedHeaders:   []string{"Content-Type", "Authorization"}, // Specify allowed headers
+		AllowCredentials: false,
+		MaxAge:           300, // Maximum value for Access-Control-Max-Age header
+	}))
+
 	//#r.Get("/", func(w http.ResponseWriter, r *http.Request) {
 	//#	w.Write([]byte("root."))
 	//#})
